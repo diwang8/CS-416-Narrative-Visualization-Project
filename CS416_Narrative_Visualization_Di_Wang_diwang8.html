@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>COVID-19 Narrative Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            background-color: #222;
+            color: white;
+            padding: 1em;
+            text-align: center;
+        }
+
+        #controls {
+            text-align: center;
+            margin: 1em;
+        }
+
+        button {
+            margin: 0 0.5em;
+            padding: 0.5em 1em;
+            font-size: 1em;
+        }
+
+        #scene {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 500px;
+            flex-direction: row;
+            gap: 2em;
+        }
+
+        svg {
+            background-color: #f9f9f9;
+        }
+
+        .annotation {
+            font-size: 12px;
+            fill: red;
+        }
+
+        .tooltip {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 5px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+        }
+
+        .interact {
+            margin-bottom: 1em;
+            text-align: center;
+        }
+
+        select,
+        input[type="date"] {
+            margin: 0.5em;
+            padding: 0.3em;
+            font-size: 1em;
+            max-width: 220px;
+        }
+
+        select {
+            padding: 0.3em;
+            font-size: 1em;
+            max-width: 220px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+
+        select[multiple] {
+            height: auto;
+            min-height: 120px;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>COVID-19 Narrative Visualization</h1>
+    </header>
+
+    <div id="controls">
+        <button onclick="switchScene(1)">Scene 1: Global Spread</button>
+        <button onclick="switchScene(2)">Scene 2: Country Comparison</button>
+        <button onclick="switchScene(3)">Scene 3: Mortality Rate</button>
+    </div>
+
+    <div class="interact" id="interact"></div>
+    <div id="scene"></div>
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        const width = 800;
+        const height = 500;
+        let covidConfirmed = [];
+        let covidDeaths = [];
+        let allDates = [];
+        let currentScene = 1;
+
+        const tooltip = d3.select("#tooltip");
+
+        Promise.all([
+            d3.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"),
+            d3.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv")
+        ]).then(([confirmed, deaths]) => {
+            const dates = confirmed.columns.slice(4).map(d => new Date(d));
+            allDates = dates;
+
+            const groupByCountry = (data) => {
+                return Array.from(d3.group(data, d => d["Country/Region"]), ([country, rows]) => {
+                    const totals = dates.map((date, i) => {
+                        const sum = d3.sum(rows, d => +d[confirmed.columns[i + 4]]);
+                        return { date, value: sum };
+                    });
+                    return { country, values: totals };
+                });
+            };
+
+            covidConfirmed = groupByCountry(confirmed);
+            covidDeaths = groupByCountry(deaths);
+
+            switchScene(1);
+        });
+
+        function clearScene() {
+            d3.select("#scene").html("");
+        }
+
+        function switchScene(sceneNumber) {
+            currentScene = sceneNumber;
+            d3.select("#interact").html("");
+            clearScene();
+
+            const svg = d3.select("#scene")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height);
+
+            if (sceneNumber === 1) {
+                setupScene1(svg);
+            } else if (sceneNumber === 2) {
+                setupScene2(svg);
+            } else if (sceneNumber === 3) {
+                setupScene3(svg);
+            }
+
+        }
+
+        function setupScene1(svg) {
+            const interact = d3.select("#interact");
+            interact.append("label").text("Start Date:");
+            interact.append("input").attr("type", "date").attr("id", "startDate").attr("value", formatDate(allDates[0]));
+            interact.append("label").text("End Date:");
+            interact.append("input").attr("type", "date").attr("id", "endDate").attr("value", formatDate(allDates[allDates.length - 1]));
+            interact.append("button").text("Update").on("click", () => updateScene1());
+
+            updateScene1();
+        }
+
+        function updateScene1() {
+            clearScene();
+
+            const container = d3.select("#scene");
+
+            container.append("div")
+                .style("width", "300px")
+                .style("padding", "1em")
+                .html(`
+                <h3>Scene 1: Global Spread</h3>
+                <p>
+                    In January 2020, a new virus was discovered in Wuhan, China. At first, few people knew how serious it would become. But within months, COVID-19 spread across the world, changing lives everywhere. Countries went into lockdown, hospitals filled up, and travel stopped. The chart shows how quickly the virus spread globally. The red mark highlights where it all began — Wuhan. From there, the rising line shows millions of cases as the pandemic grew, reminding us how fast and far the virus moved.
+                </p>
+                <p>
+                    You can select different date ranges to explore how the virus spread over time.
+                </p>
+                `);
+
+            const svg = container.append("svg").attr("width", width).attr("height", height);
+
+            svg.append("text")
+                .attr("x", 20)
+                .attr("y", 30)
+                .text("Scene 1: Global Spread of COVID-19")
+                .attr("font-size", "18px")
+                .attr("font-weight", "bold");
+
+            const start = new Date(document.getElementById("startDate").value);
+            const end = new Date(document.getElementById("endDate").value);
+
+            const global = covidConfirmed[0].values.map((d, i) => {
+                const total = d3.sum(covidConfirmed, c => c.values[i].value);
+                return { date: d.date, value: total };
+            }).filter(d => d.date >= start && d.date <= end);
+
+            drawLineChart(svg, global, "steelblue", "Cases", " January 2020: Wuhan lockdown", new Date("2020-01-23"), 1000, false, true);
+        }
+
+        function setupScene2(svg) {
+            const interact = d3.select("#interact");
+            const countries = covidConfirmed.map(d => d.country).sort();
+
+            interact.append("label").text("Select Countries:");
+            const select = interact.append("select")
+                .attr("id", "countrySelect")
+                .attr("multiple", true)
+                .style("width", "200px");
+
+            countries.forEach(c => {
+                select.append("option").attr("value", c).text(c);
+            });
+
+            ["US", "Italy", "China"].forEach(c => {
+                select.selectAll("option").filter(function () { return this.value === c; }).attr("selected", true);
+            });
+
+            interact.append("button").text("Update").on("click", () => updateScene2());
+
+            updateScene2();
+        }
+
+        function updateScene2() {
+            clearScene();
+
+            const container = d3.select("#scene");
+
+            container.append("div")
+                .style("width", "300px")
+                .style("padding", "1em")
+                .html(`
+                <h3>Scene 2: Country Comparison</h3>
+                <p>
+                    In March 2020, Italy became the first country in Europe to lock down the entire nation in response to COVID-19. The red dot marks this critical moment, as the virus spread rapidly and overwhelmed hospitals. Soon after, the United States saw an even faster rise in cases, becoming the global epicenter. In contrast, China kept its case numbers relatively low through strict early measures. This chart compares how the pandemic unfolded in these three countries, showing different paths shaped by timing, policy, and response.
+                </p>
+                <p>
+                    You can <strong>Ctrl+Click</strong> to select multiple countries.
+                </p>
+                `);
+
+            const svg = container.append("svg").attr("width", width).attr("height", height);
+
+            svg.append("text")
+                .attr("x", 20)
+                .attr("y", 30)
+                .text("Scene 2: Country Comparison")
+                .attr("font-size", "18px")
+                .attr("font-weight", "bold");
+
+            const selected = Array.from(document.getElementById("countrySelect").selectedOptions).map(o => o.value);
+            const data = covidConfirmed.filter(d => selected.includes(d.country));
+
+            const x = d3.scaleTime().domain(d3.extent(allDates)).range([60, width - 40]);
+            const y = d3.scaleLinear().domain([0, d3.max(data, c => d3.max(c.values, d => d.value))]).range([height - 50, 50]);
+
+            const line = d3.line().x(d => x(d.date)).y(d => y(d.value));
+            const color = d3.scaleOrdinal().domain(selected).range(d3.schemeCategory10);
+
+            data.forEach(countryData => {
+                svg.append("path")
+                    .datum(countryData.values)
+                    .attr("fill", "none")
+                    .attr("stroke", color(countryData.country))
+                    .attr("stroke-width", 2)
+                    .attr("d", line);
+
+                svg.selectAll(`.dot-${countryData.country}`)
+                    .data(countryData.values)
+                    .enter()
+                    .append("circle")
+                    .attr("cx", d => x(d.date))
+                    .attr("cy", d => y(d.value))
+                    .attr("r", 2)
+                    .attr("fill", color(countryData.country))
+                    .on("mouseover", (event, d) => {
+                        tooltip.style("opacity", 1)
+                            .html(`Date: ${d.date.toLocaleDateString()}<br>Cases: ${d.value.toLocaleString()}`)
+                            .style("left", (event.pageX + 10) + "px")
+                            .style("top", (event.pageY - 20) + "px");
+                    })
+                    .on("mouseout", () => tooltip.style("opacity", 0));
+            });
+
+            svg.append("g").attr("transform", `translate(0,${height - 50})`).call(d3.axisBottom(x));
+            svg.append("g").attr("transform", `translate(60,0)`).call(d3.axisLeft(y));
+            const legend = svg.append("g")
+                .attr("transform", `translate(${width - 150}, 50)`);
+
+            selected.forEach((country, i) => {
+                const yOffset = i * 20;
+                legend.append("rect")
+                    .attr("x", 0)
+                    .attr("y", yOffset)
+                    .attr("width", 12)
+                    .attr("height", 12)
+                    .attr("fill", color(country));
+
+                legend.append("text")
+                    .attr("x", 18)
+                    .attr("y", yOffset + 10)
+                    .text(country)
+                    .attr("font-size", "12px")
+                    .attr("alignment-baseline", "middle");
+            });
+            // only shows the annotation when Italy is chosen
+            if (selected.includes("Italy")) {
+                const annotationDate = new Date("2020-03-15");
+                const annotationYValue = 25000;
+                const annotationX = x(annotationDate);
+                const annotationY = y(annotationYValue);
+                const offsetY = -40;
+                const offsetX = 40;
+
+                // arrow
+                svg.append("defs").append("marker")
+                    .attr("id", "arrowhead")
+                    .attr("viewBox", "0 -5 10 10")
+                    .attr("refX", 10)
+                    .attr("refY", 0)
+                    .attr("markerWidth", 6)
+                    .attr("markerHeight", 6)
+                    .attr("orient", "auto")
+                    .append("path")
+                    .attr("d", "M0,-5L10,0L0,5")
+                    .attr("fill", "red");
+
+                svg.append("line")
+                    .attr("x1", annotationX + offsetX)
+                    .attr("y1", annotationY + offsetY)
+                    .attr("x2", annotationX)
+                    .attr("y2", annotationY)
+                    .attr("stroke", "red")
+                    .attr("stroke-width", 1.5)
+                    .attr("marker-end", "url(#arrowhead)");
+
+                svg.append("text")
+                    .attr("class", "annotation")
+                    .attr("x", annotationX + offsetX)
+                    .attr("y", annotationY + offsetY)
+                    .attr("text-anchor", "middle")
+                    .text("March 2020: Italy nationwide lockdown");
+
+                svg.append("circle")
+                    .attr("cx", annotationX)
+                    .attr("cy", annotationY)
+                    .attr("r", 5)
+                    .attr("fill", "red");
+            }
+        }
+
+
+
+        function setupScene3(svg) {
+            const interact = d3.select("#interact");
+            const countries = covidConfirmed.map(d => d.country).sort();
+
+            interact.append("label").text("Select Country:");
+            const select = interact.append("select").attr("id", "mortalityCountry");
+            countries.forEach(c => {
+                select.append("option").attr("value", c).text(c);
+            });
+
+            select.property("value", "US");
+            interact.append("button").text("Update").on("click", () => updateScene3());
+
+            updateScene3();
+        }
+
+        function updateScene3() {
+            clearScene();
+
+            const container = d3.select("#scene");
+
+            container.append("div")
+                .style("width", "300px")
+                .style("padding", "1em")
+                .html(`
+                <h3>Scene 3: Mortality Rate</h3>
+                <p>
+                    At the start of the pandemic, many who caught the virus didn’t survive — the mortality rate was high and fear was everywhere. But in 2021, something changed. The red dot marks the beginning of vaccine rollout in the U.S., a turning point in the fight against COVID-19. As more people got vaccinated, fewer people died. The line in the chart drops and stays low, showing how vaccines helped save lives and bring hope after a long, dark year.
+                </p>
+                <p>
+                    You can select other countries to explore their mortality trends. 
+                </p>
+                `);
+
+            const svg = container.append("svg").attr("width", width).attr("height", height);
+
+            svg.append("text")
+                .attr("x", 20)
+                .attr("y", 30)
+                .text("Scene 3: Mortality Rate")
+                .attr("font-size", "18px")
+                .attr("font-weight", "bold");
+
+            const country = document.getElementById("mortalityCountry").value;
+            const confirmed = covidConfirmed.find(d => d.country === country)?.values || [];
+            const deaths = covidDeaths.find(d => d.country === country)?.values || [];
+
+            const mortality = confirmed.map((d, i) => {
+                const rate = confirmed[i].value > 0 ? deaths[i].value / confirmed[i].value : 0;
+                return { date: d.date, value: rate };
+            });
+
+            const showAnnotation = (country === "US");
+            drawLineChart(svg, mortality, "orange", "Mortality Rate", "2021: Vaccination begins in US", new Date("2021-01-01"), 0.02, true, showAnnotation);
+        }
+
+
+        function drawLineChart(svg, data, color, label, annotationText, annotationDate, annotationY, isPercent = false, showAnnotation = true) {
+            const x = d3.scaleTime().domain(d3.extent(data, d => d.date)).range([60, width - 40]);
+            const y = d3.scaleLinear().domain([0, d3.max(data, d => d.value)]).range([height - 50, 50]);
+
+            const line = d3.line().x(d => x(d.date)).y(d => y(d.value));
+
+            svg.append("path")
+                .datum(data)
+                .attr("fill", "none")
+                .attr("stroke", color)
+                .attr("stroke-width", 2)
+                .attr("d", line);
+
+            svg.selectAll("circle")
+                .data(data)
+                .enter()
+                .append("circle")
+                .attr("cx", d => x(d.date))
+                .attr("cy", d => y(d.value))
+                .attr("r", 2)
+                .attr("fill", color)
+                .on("mouseover", (event, d) => {
+                    tooltip.style("opacity", 1)
+                        .html(`Date: ${d.date.toLocaleDateString()}<br>${label}: ${isPercent ? (d.value * 100).toFixed(2) + "%" : d.value.toLocaleString()}`)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 20) + "px");
+                })
+                .on("mouseout", () => tooltip.style("opacity", 0));
+
+            svg.append("g").attr("transform", `translate(0,${height - 50})`).call(d3.axisBottom(x));
+            svg.append("g").attr("transform", `translate(60,0)`).call(d3.axisLeft(y));
+
+            if (showAnnotation) {
+                const annotationX = x(annotationDate);
+                const annotationYPos = y(annotationY);
+                const offsetX = 40; // horizontal
+                const offsetY = -40; // vertical
+
+                // arrow
+                svg.append("line")
+                    .attr("x1", annotationX + offsetX)
+                    .attr("y1", annotationYPos + offsetY)
+                    .attr("x2", annotationX)
+                    .attr("y2", annotationYPos)
+                    .attr("stroke", "red")
+                    .attr("stroke-width", 1.5)
+                    .attr("marker-end", "url(#arrowhead)");
+
+                // annotation text
+                svg.append("text")
+                    .attr("class", "annotation")
+                    .attr("x", annotationX + offsetX)
+                    .attr("y", annotationYPos + offsetY - 5)
+                    .text(annotationText);
+
+                // annotation
+                svg.append("circle")
+                    .attr("cx", annotationX)
+                    .attr("cy", annotationYPos)
+                    .attr("r", 5)
+                    .attr("fill", "red");
+            }
+            svg.append("defs").append("marker")
+                .attr("id", "arrowhead")
+                .attr("viewBox", "0 -5 10 10")
+                .attr("refX", 10)
+                .attr("refY", 0)
+                .attr("markerWidth", 6)
+                .attr("markerHeight", 6)
+                .attr("orient", "auto")
+                .append("path")
+                .attr("d", "M0,-5L10,0L0,5")
+                .attr("fill", "red");
+        }
+
+        function formatDate(d) {
+            return d.toISOString().split("T")[0];
+        }
+    </script>
+</body>
+
+
+</html>
